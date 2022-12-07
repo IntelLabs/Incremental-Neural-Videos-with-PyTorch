@@ -1,0 +1,45 @@
+general new files:
+./3rd_party_usages.py
+./helpers.py
+./img_to_vid.py
+./images/*
+
+2D_experiments: based on https://github.com/GlassyWing/fourier-feature-networks
+new files:
+2D_experiments/color_scheme_transfer.py
+2D_experiments/const.py
+2D_experiments/mid_layers_experiments.py
+2D_experiments/neural_videos.py
+2D_experiments/siren_ff.py
+2D_experiments/swap_1st_layer.py
+
+modifications:
+2D_experiments/siren_ff.py
+2D_experiments/dataset.py
+2D_experiments/demo.py
+
+
+
+
+3D_experiments: based on https://github.com/yenchenlin/nerf-pytorch
+new files:
+3D_experiments/configs/*
+3D_experiments/config_parser.py
+3D_experiments/fpzip_test.py
+3D_experiments/helpers.py
+3D_experiments/INV_basic.py
+3D_experiments/model_helpers.py
+3D_experiments/nerf_motion_layer.py
+3D_experiments/nerf_siren_ff.py
+
+modifications:
+3D_experiments/load_llff.py
+
+
+models: perceptual loss measurement tool, from https://github.com/zhengqili/Neural-Scene-Flow-Fields/tree/main/nsff_exp/models
+
+other packages:
+pytorch, fpzip
+
+data:
+15 camera array, Plenoptic Video Datasets (from paper "Neural 3D Video Synthesis from Multi-view Video")
