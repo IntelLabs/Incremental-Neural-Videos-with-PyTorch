@@ -2,23 +2,21 @@
 # s: from which layer to freeze
 # SD: sample dynamic pixels more
 # near: nearest sampling inv depth. META day scenes are ~0.5, night scenes ~0.3
-expname = META_flame_salmon_1_warmup10k_iter10k_s3_stability0_relu_l2_freeze120
+expname = META_flame_salmon_3D_color_transfer_from_cut_roasted_beef
 basedir = ../../META_data/flame_salmon_1/down_2x
 datadir = ../../META_data/flame_salmon_1/down_2x
 dataset_type = META
 
+ft_path = /playpen-ssd/mikewang/incremental_neural_videos/META_data/cut_roasted_beef/down_2x/META_cut_roasted_beef_warmup280k_iter280k_s3_stability0_relu_l2_test/000001.tar
 is_nerf_baseline = True             # True if running NeRF baseline, will disable incremental training.
-i_weights_warmup = 10000    # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
-i_weights = 10000           # iters/frame after warmup, during Structure Transfer (with frozen/shared later layers). 10k is 7.5~8min
-freeze_start_frame = 120    # on and after this frame, color layers will be frozen/shared.
-mid_freeze_start = 3        # on and after this layer, layers are frozen/shared. (3 means 0,1,2 are not frozen)
+i_iter_img = 1000           # save rendering every N iterations
+i_weights_warmup = 50000   # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
+i_weights = 50000          # iters/frame after warmup, during Structure Transfer (with frozen/shared later layers). 10k is 7.5~8min
+freeze_start_frame = 0     # on and after this frame, color layers will be frozen/shared.
+mid_freeze_start = 1        # on and after this layer, layers are frozen/shared. (3 means 0,1,2 are not frozen)
 near = 0.5                  # nearest (inverted if NDC) depth for sampling start. META day scenes are ~0.5, night scenes ~0.3
 
 # not used
-sample_dynamic_more = False  # helps dynamic parts, but overall score worse
-sample_static_prob = 0.65
-stablize_iter_prob = 0
-prev_fine_as_new_coarse = False  # results slightly worse
 use_huber = False
 use_weight_decay = True
 
@@ -28,7 +26,6 @@ mid_freeze_end = 8
 #lrate_decay = 30
 no_skip_connect = True
 i_img = 100
-i_iter_img = 1000  # how often to render when baseline nerf full training
 no_reload = False
 
 start_frame = 1

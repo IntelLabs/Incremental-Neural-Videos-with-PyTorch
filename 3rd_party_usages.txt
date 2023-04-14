@@ -42,4 +42,4 @@ other packages:
 pytorch, fpzip
 
 data:
-15 camera array, Plenoptic Video Datasets (from paper "Neural 3D Video Synthesis from Multi-view Video")
+LF 15 camera array, Plenoptic Video Datasets (from paper "Neural 3D Video Synthesis from Multi-view Video")

@@ -10,6 +10,7 @@ from dataset import ImageDataset
 
 import matplotlib.pyplot as plt
 
+
 def get_embedder(multires):
     embed_kwargs = {
         'include_input': True,
@@ -87,12 +88,6 @@ class SirenLayer(nn.Module):
     def forward(self, x):
         x = self.linear(x)
         return x if self.is_last else torch.sin(self.w0 * x)
-        # if self.is_last:
-        #     return x
-        # elif self.is_mid:
-        #     return nn.functional.relu(x)
-        # else:
-        #     return torch.sin(self.w0 * x)
 
 
 def input_mapping(x, B, use_nerf_pe):
@@ -126,11 +121,8 @@ class SIRENFF(nn.Module):
         """
         super(SIRENFF, self).__init__()
         self.first_layer = SirenLayer(input_dim, hidden_dim, is_first=True)
-        self.mid_layers = nn.ModuleList([SirenLayer(hidden_dim, hidden_dim) for i in range(1, num_layers - 1)])
-        # self.mid_layers = nn.ModuleList([SirenLayer(hidden_dim, hidden_dim),
-        #                                  SirenLayer(hidden_dim, hidden_dim),
-        #                                  SirenLayer(hidden_dim, hidden_dim)])
-        # self.mid_supervision = SirenLayer(hidden_dim, 3, is_last=True)
+        self.mid_layers = nn.ModuleList([SirenLayer(hidden_dim, hidden_dim)
+                                         for i in range(1, num_layers - 1)])
         self.final_layer = SirenLayer(hidden_dim, output_dim, is_last=True)
 
     def forward(self, x):
@@ -138,16 +130,15 @@ class SIRENFF(nn.Module):
         y = None
         for i, layer in enumerate(self.mid_layers):
             x = layer(x)
-            # if i == 1:
-            #     y = self.mid_supervision(x)
         x = self.final_layer(x)
         return x, y
 
-class FFN(nn.Module):
+
+class MLP(nn.Module):
     def __init__(self, num_layers, input_dim, hidden_dim, output_dim=3):
         """
         """
-        super(FFN, self).__init__()
+        super(MLP, self).__init__()
         self.first_layer = nn.Linear(input_dim, hidden_dim)
         self.mid_layers = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for i in range(1, num_layers - 1)])
         self.final_layer = nn.Linear(hidden_dim, output_dim)

@@ -462,9 +462,11 @@ def load_LF_data(basedir, start_frame, factor=8, recenter=True, bd_factor=.75, s
     K = np.moveaxis(K, -1, 0).astype(np.float32)
     # poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1)
     # poses[1:3, 3, :] = -poses[1:3, 3, :] # don't need this, this is for the left and right flipped case
-    poses = np.concatenate([poses[:, 1:2, :], poses[:, 0:1, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1)
-    poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1)
-
+    #
+    #poses = np.concatenate([poses[:, 1:2, :], poses[:, 0:1, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1)
+    #poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1)
+    poses[:, 1, :] = -poses[:, 1,:] # turn y up (sampled with -, image coords are down)
+    poses[:, 2, :] = -poses[:, 2,:] # turn z towards the viewer (sampled with -)
     print('Loaded', basedir, bds.min(), bds.max())
 
     poses = np.moveaxis(poses, -1, 0).astype(np.float32)
@@ -551,6 +553,7 @@ def load_META_data(basedir, start_frame, factor=8, recenter=True, bd_factor=.75,
     # note: target coord-sys (graphics) : x: right, y: up, z:out-of,
     #  cv convention in target coord-sys: [x, -y, -z]
     K = np.moveaxis(K, -1, 0).astype(np.float32)
+    #ATTN: Y needs inversion here to point up
     poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1)
 
     print('Loaded', basedir, bds.min(), bds.max())
@@ -660,10 +663,7 @@ def _load_META_data(basedir, start_frame, factor=None, width=None, height=None, 
     else:
         factor = 1
 
-    if sfx == '':
-        imgdir = os.path.join(basedir, 'frames')
-    else:
-        imgdir = os.path.join(basedir, 'frames'+sfx)
+    imgdir = os.path.join(basedir, 'frames'+sfx)
     if not os.path.exists(imgdir):
         print(imgdir, 'does not exist, returning')
         return
@@ -709,3 +709,36 @@ def _load_META_data(basedir, start_frame, factor=None, width=None, height=None, 
     else:
         print('Loaded image data', imgs.shape, poses[:, -1, 0])
         return poses, Ks, bds, imgs
+
+##################
+# debug plots
+##################
+def plot_cams(poses, p=3):
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+
+    # For each set of style and range settings, plot n random points in the box
+    # defined by x in [23, 32], y in [0, 100], z in [zlow, zhigh].
+    #for m, zlow, zhigh in [('o', -50, -25), ('^', -30, -5)]:
+    #    xs = randrange(n, 23, 32)
+    #    ys = randrange(n, 0, 100)
+    #    zs = randrange(n, zlow, zhigh)
+    #    ax.scatter(xs, ys, zs, marker=m)
+    xs = poses[0,p,:]
+    ys = poses[1,p,:]
+    zs = poses[2,p,:]
+    lim = max(abs(xs))
+    lim = max(lim, max(abs(ys)))
+    lim = max(lim, max(abs(zs)))
+    
+    ax.scatter(xs, ys, zs, marker='o')
+    ax.set_xlabel('X Label')
+    ax.set_ylabel('Y Label')
+    ax.set_zlabel('Z Label')
+    #plt.axis('square')
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_zlim(-lim, lim)
+
+    plt.show()

@@ -12,24 +12,36 @@ from model_helpers import *
 from helpers import create_nerf, render, render_path, create_ray_rgb_K_batches
 from load_llff import load_LF_data, load_META_data
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
 
 
+META, LF = ['META', 'little_falls']
+
+# model weights for color layer, later finetuned on the frame based on the config file
+start_frame = 1     # index starts at 1
+continue_prev_exp = True
+if continue_prev_exp:
+    base_weight = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/' \
+                  'META_flame_salmon_3D_color_transfer_from_cut_roasted_beef/000001_iter004999.tar'
+else:
+    base_weight = None
+
 def train():
 
     parser = config_parser()
     args = parser.parse_args()
+    args.start_frame = start_frame
 
     # Create log dir and copy the config file
     basedir = args.basedir
     expname = args.expname
     vis_dir = os.path.join(basedir, expname, 'nerf_esti')
+
+    # create directories for logging
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     os.makedirs(vis_dir, exist_ok=True)
-    # writer = SummaryWriter(vis_dir)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
         for arg in sorted(vars(args)):
@@ -42,21 +54,23 @@ def train():
 
     # Create nerf model
     if args.is_nerf_baseline:
-        args.no_reload = True
-        args.no_skip_connect = False       # orig nerf has skip connection
-        args.sample_dynamic_more = False
-        args.freeze_start_frame = 10000
-        args.i_weights = 200000
-        global_step = 0
-    else:
-        print("running INV")
+        print("\n#### 3D color transfer with NeRF (with skip connection) ####\n")
+        args.no_reload = False              # need to load trained color layers
+        if continue_prev_exp:
+            args.ft_path = base_weight
+        args.no_skip_connect = True         # orig nerf has skip connection
+        args.freeze_start_frame = 0         # freeze all color layers
+
         render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, ckpt_path = create_nerf(args)
         render_kwargs_train_prev, render_kwargs_test_prev, _, _, _, _ = create_nerf(args)
         global_step = start
-
-        # load base model
-        if ckpt_path is not None:
-            args.start_frame = int(os.path.basename(ckpt_path)[:6]) + 1
+        iter_start = start
+    else:
+        print("3D color transfer with INV (with skip connection)")
+        render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, ckpt_path = create_nerf(args)
+        render_kwargs_train_prev, render_kwargs_test_prev, _, _, _, _ = create_nerf(args)
+        global_step = start
+        iter_start = 0
 
     print('Begin')
 
@@ -69,12 +83,6 @@ def train():
         loss_fn = img2mse
 
     for f_i in range(100000):
-        if args.is_nerf_baseline:
-            print("running baseline NeRF without transfer")
-            render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, ckpt_path = create_nerf(args)
-            render_kwargs_train_prev, render_kwargs_test_prev, _, _, _, _ = create_nerf(args)
-            global_step = start
-
         time_l0 = time.time()
         cur_frame = args.start_frame + f_i
         print(f'\n frame -- {cur_frame}')
@@ -94,7 +102,7 @@ def train():
         hwf = poses[0, :3, -1]
         poses = poses[:, :3, :4]
         print('Loaded llff', images.shape, render_poses.shape, hwf, args.datadir)
-        print('holdout test view:', args.llffhold) # ATTN: need to add auto option
+        print('holdout test view:', args.llffhold)
         i_test =[args.llffhold]
         i_val = i_test
         i_train = np.array([i for i in np.arange(int(images.shape[0])) if
@@ -136,7 +144,7 @@ def train():
 
         # INV freezes color layers after a certain frame
         if cur_frame >= args.freeze_start_frame:
-            for model_tmp in [get_base(render_kwargs_train['network_fine']), get_base(render_kwargs_train['network_fn'])]:
+            for model_tmp in [render_kwargs_train['network_fine'], render_kwargs_train['network_fn']]:
                 for l in range(len(model_tmp.pts_linears)):
                     if l < args.mid_freeze_start:
                         print(f"layer {l} not frozen")
@@ -153,25 +161,24 @@ def train():
                 model_tmp.rgb_linear.bias.requires_grad = False
 
         train_iter = args.i_weights if cur_frame >= args.freeze_start_frame else args.i_weights_warmup
-        for i in trange(train_iter):
-
+        for i in tqdm(range(iter_start, train_iter)):
             # nerf baseline: render intermediate results
             if args.is_nerf_baseline and (i % args.i_iter_img == 0 or i == train_iter-1):
                 with torch.no_grad():
-                    img_i = i_val[0]
-                    gt_img = torch.Tensor(images[img_i]).to(device)
-                    pose = poses[img_i, :3, :4]
-                    rgb, disp, acc, extras = render(H, W, K[img_i], chunk=args.chunk, c2w=pose,
-                                                    **render_kwargs_test)
-                    psnr = mse2psnr(img2mse(rgb, gt_img))
-                    filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_iter{i}_{psnr.item():04f}.png')
-                    imageio.imwrite(filename, to8b(rgb.cpu().numpy()))
+                    for img_i in [0, 1, 8, 17]:
+                        gt_img = torch.Tensor(images[img_i]).to(device)
+                        pose = poses[img_i, :3, :4]
+                        rgb, disp, acc, extras = render(H, W, K[img_i], chunk=args.chunk, c2w=pose,
+                                                        **render_kwargs_test)
+                        psnr = mse2psnr(img2mse(rgb, gt_img))
+                        filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_iter{i}_{psnr.item():04f}.png')
+                        imageio.imwrite(filename, to8b(rgb.cpu().numpy()))
 
                     path = os.path.join(basedir, expname, f'{cur_frame:06d}_iter{i:06d}.tar')
                     torch.save({
                         'global_step': global_step,
-                        'network_fn_state_dict': get_base(render_kwargs_train['network_fn']).state_dict(),
-                        'network_fine_state_dict': get_base(render_kwargs_train['network_fine']).state_dict(),
+                        'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
+                        'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                     }, path)
                     print('Saved checkpoints at', path)
@@ -213,9 +220,8 @@ def train():
                 loss = loss + img_loss0
 
             loss.backward()
-            # ATTN:
-            torch.nn.utils.clip_grad_norm_(get_base(render_kwargs_train['network_fn']).parameters(), 2.)
-            torch.nn.utils.clip_grad_norm_(get_base(render_kwargs_train['network_fine']).parameters(), 2.)
+            torch.nn.utils.clip_grad_norm_(render_kwargs_train['network_fn'].parameters(), 2.)
+            torch.nn.utils.clip_grad_norm_(render_kwargs_train['network_fine'].parameters(), 2.)
             optimizer.step()
 
             dt = time.time()-time0
@@ -223,31 +229,6 @@ def train():
 
             if i%args.i_print==0 and i > 0:
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item():04f}  PSNR: {psnr.item():04f}")
-
-            # nerf baseline: save intermediate weights
-            if args.is_nerf_baseline and i % 10000 == 0:
-                nerf_baseline_vis_dir = os.path.join(basedir, expname, 'nerf_esti')
-                os.makedirs(nerf_baseline_vis_dir, exist_ok=True)
-                for img_i in i_val:
-                    gt_img = torch.Tensor(images[img_i]).to(device)
-                    pose = poses[img_i, :3, :4]
-                    with torch.no_grad():
-                        rgb, disp, acc, extras = render(H, W, K[img_i], chunk=args.chunk, c2w=pose,
-                                                        **render_kwargs_test)
-
-                    psnr = mse2psnr(img2mse(rgb, gt_img))
-
-                    filename = os.path.join(nerf_baseline_vis_dir, f'cam{img_i:02d}_iter{i:06d}_{psnr.item():06f}.png')
-                    imageio.imwrite(filename, to8b(rgb.cpu().numpy()))
-
-                path = os.path.join(basedir, expname, f'{cur_frame:06d}_iter{i:06d}.tar')
-                torch.save({
-                    'global_step': global_step,
-                    'network_fn_state_dict': get_base(render_kwargs_train['network_fn']).state_dict(),
-                    'network_fine_state_dict': get_base(render_kwargs_train['network_fine']).state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                }, path)
-                print('Saved checkpoints at', path)
 
         time_e0 = time.time()
         print(f"{time_e0-time_s0:.3f} sec / frame")
@@ -267,8 +248,8 @@ def train():
         path = os.path.join(basedir, expname, '{:06d}.tar'.format(cur_frame))
         torch.save({
             'global_step': global_step,
-            'network_fn_state_dict': get_base(render_kwargs_train['network_fn']).state_dict(),
-            'network_fine_state_dict': get_base(render_kwargs_train['network_fine']).state_dict(),
+            'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
+            'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
         }, path)
         print('Saved checkpoints at', path)
@@ -281,12 +262,6 @@ def train():
                 rgbs, disps = render_path(render_poses[:60:2], hwf, K[6], args.chunk, render_kwargs_test, savedir=testsavedir)
             print('Done, saving', rgbs.shape, disps.shape)
 
-def get_base(model) :
-    try:
-        module = model.module
-    except AttributeError:
-        module = model
-    return module
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

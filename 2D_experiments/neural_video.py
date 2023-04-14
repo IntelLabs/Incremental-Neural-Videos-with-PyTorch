@@ -7,7 +7,7 @@ from skvideo.io.ffmpeg import FFmpegReader
 
 from const import *
 from dataset import ImageDataset
-from siren_ff import SIRENFF, input_mapping, FFN, get_embedder
+from siren_ff import SIRENFF, input_mapping, MLP, get_embedder
 
 import matplotlib.pyplot as plt
 
@@ -27,7 +27,7 @@ def train_model(model, optim, loss_fn, iters, B, use_nerf_pe, train_data, test_d
 
         train_psnrs.append(- 10 * torch.log10(2 * t_loss).item())
 
-        if is_nerf_baseline and (i+1)%per_frame_train_iters == 0:
+        if is_baseline and (i+1)%per_frame_train_iters == 0:
             model.eval()
             with torch.no_grad():
                 v_o, _ = model(input_mapping(test_data[0], B, use_nerf_pe))
@@ -54,16 +54,11 @@ def train_model(model, optim, loss_fn, iters, B, use_nerf_pe, train_data, test_d
 if __name__ == '__main__':
     device = "cuda:0"
 
-    # parameters
-    if use_nerf_pe:
-        B_emb, _ = get_embedder(mapping_size)
-    else:
-        B_emb = torch.randn((mapping_size, 2)).to(device) * 10
-
-    # ds = ImageDataset("data/fox.jpg", 512)
-    if is_nerf_baseline:
-        result_dir = os.path.join(vid_path, 'imgs_nerf_baseline')
-        model_dir = os.path.join(vid_path, 'models_nerf_baseline')
+    if is_baseline:
+        # for quantitative comparisons between
+        # [incremental frame-to-frame] and [baseline (from scratch)] at the same accumulative iterations
+        result_dir = os.path.join(vid_path, 'imgs_baseline')
+        model_dir = os.path.join(vid_path, 'models_baseline')
         if os.path.exists(model_dir) or os.path.exists(result_dir):
             assert False, "make sure you clean previous data"
         else:
@@ -98,10 +93,34 @@ if __name__ == '__main__':
         data_iterator = frame_reader()
     image_resolution = (h // img_downsample, w // img_downsample)
 
-    # setup optimizer and model
-    if no_siren_only_mlp:
-        model = FFN(*network_size).to(device)
+    # select the model and positional encoding
+    # Note: 4 types of 2D mlp are supported
+    #       (1) simple mlp + nerf pos. enc. (sin & cos encodes xyz separately)
+    #       (2) SIREN (sin activation) + nerf pos. enc.
+    #       (3) simple mlp + FF (fourier features, sin & cos encodes xyz together)
+    #       (4) SIREN + FF
+    #       SIREN + FF usually gives best results, and best for structure swap.
+
+    # Note: without positional encoding, we don't notice structure layers since
+    #       structure swap fails. Color/structure info is mixed in all layers,
+    #       instead of structure info being store mostly in the 1st layer.
+    #       Thus, we speculate that the improvement from positional encoding could be tied to
+    #       the good separation between structure and color information
+    if use_nerf_pe:
+        # Pos. Enc. used by NeRF. Sin & cos encoding for x, y, and z separately
+        # Note: In both 2D & 3D, we notice stripe like artifacts during training,
+        #  possibly due to the separate encoding
+        B_emb, _ = get_embedder(mapping_size)
     else:
+        # Fourier Features. Sin & cos encodes xyz together using matrix multiplication
+        # Note: In both 2D & 3D, we notice blob like artifacts during training,
+        #  possibly due to encoding xyz's together
+        B_emb = torch.randn((mapping_size, 2)).to(device) * 10
+
+    if no_siren_only_mlp:
+        model = MLP(*network_size).to(device)
+    else:
+        # SIREN uses sin activation layers
         model = SIRENFF(*network_size).to(device)
     optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss_fn = torch.nn.MSELoss()

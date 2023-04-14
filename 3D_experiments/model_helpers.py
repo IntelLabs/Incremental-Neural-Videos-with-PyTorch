@@ -110,25 +110,43 @@ class NeRF(nn.Module):
 
         return outputs
 
-    def forward(self, x):
+    def forward(self, x, only_train_alpha_head=False):
         input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
         h = input_pts
         for i, l in enumerate(self.pts_linears):
-            h = self.pts_linears[i](h)
-            h = F.relu(h)
-            if i in self.skips:
-                h = torch.cat([input_pts, h], -1)
+            if only_train_alpha_head:
+                with torch.no_grad():
+                    h = self.pts_linears[i](h)
+                    h = F.relu(h)
+                    if i in self.skips:
+                        h = torch.cat([input_pts, h], -1)
+            else:
+                h = self.pts_linears[i](h)
+                h = F.relu(h)
+                if i in self.skips:
+                    h = torch.cat([input_pts, h], -1)
 
         if self.use_viewdirs:
             alpha = self.alpha_linear(h)
-            feature = self.feature_linear(h)
-            h = torch.cat([feature, input_views], -1)
-        
-            for i, l in enumerate(self.views_linears):
-                h = self.views_linears[i](h)
-                h = F.relu(h)
+            if only_train_alpha_head:
+                with torch.no_grad():
+                    feature = self.feature_linear(h)
+                    h = torch.cat([feature, input_views], -1)
 
-            rgb = self.rgb_linear(h)
+                    for i, l in enumerate(self.views_linears):
+                        h = self.views_linears[i](h)
+                        h = F.relu(h)
+
+                    rgb = self.rgb_linear(h)
+            else:
+                feature = self.feature_linear(h)
+                h = torch.cat([feature, input_views], -1)
+
+                for i, l in enumerate(self.views_linears):
+                    h = self.views_linears[i](h)
+                    h = F.relu(h)
+
+                rgb = self.rgb_linear(h)
             outputs = torch.cat([rgb, alpha], -1)
         else:
             outputs = self.output_linear(h)
@@ -173,7 +191,7 @@ def get_rays(H, W, K, c2w):
     j = j.t()
     dirs = torch.stack([(i-K[0][2])/K[0][0], -(j-K[1][2])/K[1][1], -torch.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame
-    rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    rays_d = torch.sum(dirs[..., None, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = c2w[:3,-1].expand(rays_d.shape)
     return rays_o, rays_d

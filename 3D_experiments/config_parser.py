@@ -43,6 +43,12 @@ def config_parser():
     parser.add_argument("--sample_static_prob", type=float)
     parser.add_argument("--near", type=float, default=0.)
     parser.add_argument("--is_nerf_baseline", action='store_true')
+    parser.add_argument("--split_static_dynamic", action='store_true',
+                        help='use different NeRF for static and dynamic data')
+    parser.add_argument("--pretraining_static", action='store_true',
+                        help='is pretraining a static nerf on several frames to get good background first')
+    parser.add_argument("--enforce_zero_rgba", action='store_true',
+                        help='masked static region should have close to 0 density')
 
     # rendering options
     parser.add_argument("--i_iter_img", type=int, default=10000000,

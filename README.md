@@ -1,5 +1,5 @@
 # INV: Understanding Functionalities Of MLPs Layers To Design Efficient Representations For Incremental Neural Videos
-Shengze Wang, Alexei Soupikov, Joshua Ratcliff, Ronald Azuma
+Shengze Wang, Alexey Supikov, Joshua Ratcliff, Ronald Azuma
 
 
 **TL;DR** INVs is a fast incremental representation for neural videos. Each frame can be trained in under 10 minutes 
@@ -57,8 +57,7 @@ video for `frames/` folder<br />
 `start_frame`:&emsp; the starting frame<br />
 `img_downsample`:&emsp; the downsampling factor. To accelerate training, use a larger (e.g. 4 or 8) factor, but make sure frame 
 size is divisible by this numer. <br />
-`no_siren_only_mlp`:&emsp; don't use SIREN, use basic MLP. Default `True`. If fails with `False`, should work with minimum code 
-change, haven't tested for a while.<br />
+`no_siren_only_mlp`:&emsp; To use basic MLP instead of MLP. Default `True`. <br />
 `use_nerf_pe`:&emsp; use NeRF positional encoding (i.e. sin & cos for xyz separately). Default `True`. If `False`, will use 
 Fourier Features where xyz encoded together via sin & cos and random frequencies. Similarly, haven't tested for a while.  
 
@@ -181,7 +180,7 @@ ffmpeg -i camxx.mp4 -vf scale=1352:1014 frames_2/frame%04dcamxx.png
 <br />
 <br />
 
-#### Running INV+NeRF
+#### Running 3D INV
 
 ```commandline
 cd 3D_experiments
@@ -205,38 +204,49 @@ But if 280k/frame, you could freeze early at 30th frame. Easier scenes (e.g. MET
 `factor`&emsp; downsampling factor. Affects the folder of images used. If `1`, assumes `frames/`, otherwise assumes`frames_{factor}` <br />
 `near`&emsp; nearest depth (inverted depth if NDC) to start sampling along a ray. META day scenes are ~0.5, 
 night scenes ~0.35 <br />
-`no_skip_connect`&emsp; set to `True` for INV, `False` for NeRF. Increases number of Structure Layers, and also improves performance. <br />
+`no_skip_connect`&emsp; set to `True` for INV, `False` for NeRF. Skip connection improves performance at the cost of 
+increased number of Structure Layers, leading to more layers needed to be stored. <br />
 
 ###### Output  
-models saved in `{basedir}/{expname}/`
-renderings saved in `{basedir}/{expname}/nerf_esti/`
-
-<br /> 
-<br /> 
-<br />
-
-To conduct further experiments in 3D, follow (5) to get the required data first.
-### 5. 3D Incremental Transfer
-
-<details>
-  <summary> More Info (click to expand) </summary> 
-
-run by calling: 
-```commandline
-cd 3D_experiments
-python INV_basic.py --config configs/META_flame_salmon_1_10k.txt
-```
-Don't freeze any layer (i.e set `mid_freeze_start` to a large number like 1000).
-
-###### Output  
-models saved in `{basedir}/{expname}` <br />
+The complete models (including frozen color layers, and not compressed) are saved in `{basedir}/{expname}/` <br />
 renderings saved in `{basedir}/{expname}/nerf_esti/` <br />
 e.g. `D:\data\cut_roasted_beef\META_flame_salmon_1_warmup10k_iter10k_s3_freeze120_test\nerf_esti` <br />
-
-</details>
 <br />
 
-### 6. 3D Structure Swap visualizes Sturctral & Color Knowledge in different layers 
+### 5. 3D Split INV
+Split INV uses a separate NeRF to encode static background and thus allow most of the computation to be focused on 
+dynamic foreground content. As a result, flickering is reduced, and the foreground is of much higher quality.<br /> 
+First, generate dynamic masks by thresholding optical flow maps from methods like 
+`SeparableFlow`. `True` pixels indicate dynamic foreground pixels. Store the masks under `{basedir}/mask/`.<br />
+<br />
+To run on a sequence, e.g. `flame_salmon_1`, first extract static background. Set `pretraining_static=True` 
+in `META_flame_salmon_split_mlp_10k_linux.txt`, and run:
+```commandline
+cd 3D_experiments
+python INV_split.py --config ./configs/META_flame_salmon_split_mlp_10k_linux.txt
+```
+The script would iterate through all frames and store the extracted static model in `{basedir}/{expname}_static/`<br />
+Then, encode dynamic foreground by setting `pretraining_static=False` and running: 
+```commandline
+cd 3D_experiments
+python INV_split.py --config ./configs/META_flame_salmon_split_mlp_10k_linux.txt
+```
+During the first several frames (default 9), background is also optimized, so it takes slightly longer. Afterwards, it's around 
+10min/frame. <br />
+The complete models (including frozen color layers, and not compressed) are saved in `{basedir}/{expname}_dynamic/`<br />
+Renderings for the test view are saved in `{basedir}/{expname}_dynamic/nerf_esti`<br />
+
+### 6. Temporal Weight Compression (TWC)
+TWC utilizes floating point compression algorithm `fpzip` to compress a temporal weight matrix from `1.12MB` down to 
+`300kb` per frame. TWC first reshapes the weights of the structure layers into a 2D matrix for each frame. Then, TWC 
+concatenates the weight matrices of all frames into a 3D matrix. Then `fpzip` compresses this matrix at `16-bit` 
+resolution. To run TWC on the set of saved models, run:   
+```commandline
+cd 3D_experiments
+python fpzip_test.py
+```
+
+### 7. 3D Structure Swap visualizes Sturctral & Color Knowledge in different layers 
 <details>
   <summary> More Info (click to expand) </summary> 
 Similar to 2D Structure Swap, the script shows results of replacing `base_frame`'s Structure Layers with those of other 
