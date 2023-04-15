@@ -36,6 +36,8 @@ def config_parser():
                         help='do not reload weights from saved ckpt')
     parser.add_argument("--ft_path", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
+    parser.add_argument("--parallel", action='store_true',
+                        help='train in data parallel mode (adjust batch size, chunk and netchunk accordingly)')
     parser.add_argument("--use_weight_decay", action='store_true')
     parser.add_argument("--use_huber", action='store_true')
     parser.add_argument("--prev_fine_as_new_coarse", action='store_true')

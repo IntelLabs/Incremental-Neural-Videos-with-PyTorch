@@ -13,7 +13,6 @@ from model_helpers import *
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
-PAR_TEST = False
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -333,7 +332,7 @@ def create_nerf(args):
         ckpt_path = None
 
     ##########################
-    if PAR_TEST:
+    if args.parallel:
         model_fine = torch.nn.DataParallel(model_fine)
         model = torch.nn.DataParallel(model)
 
