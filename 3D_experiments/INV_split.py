@@ -13,12 +13,17 @@ from model_helpers import *
 from helpers import create_nerf, render, render_blend_two_models, render_path, create_ray_rgb_K_batches
 from load_llff import load_LF_data, load_META_data
 
-# random middle layers actually also works
-FREEZE_MIDDLE_LAYERS = False
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
 DEBUG = False
+
+
+# base_bgd_model = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/' \
+#                  'META_flame_salmon_1_SplitINV_test_dynamic/000029_static.tar'
+base_bgd_model = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/' \
+                 'META_flame_salmon_1_SplitINV_test_static/000200_static.tar'
+# base_bgd_model = None
+# TRAIN_STATIC_ALPHA = True
 
 def npar_create_nerf(args):
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, ckpt_path = create_nerf(args)
@@ -57,6 +62,10 @@ def train():
         with open(f, 'w') as file:
             file.write(open(args.config, 'r').read())
 
+        if not args.pretraining_static and i == 0:
+            args.ft_path = base_bgd_model
+        else:
+            args.ft_path = None
         os.makedirs(os.path.join(basedir, args.expname), exist_ok=True)
         nerf.append(npar_create_nerf(args))
     args.expname = expname
@@ -143,6 +152,8 @@ def train():
         for nr in nerf:
             nr["render_kwargs_train"].update(bds_dict)
             nr["render_kwargs_test"].update(bds_dict)
+        render_kwargs_train_two_models.update(bds_dict)
+        render_kwargs_test_two_models.update(bds_dict)
 
         # Prepare raybatch tensor if batching random rays
         N_rand = args.N_rand
@@ -177,29 +188,52 @@ def train():
         #           1.1: 75% fgd nerf masked, 1.2: 25%, fgd nerf not masked, bgd fixed
         # Stage 3: quality good & start INV (freeze later layers)
         train_iter = args.i_weights if cur_frame >= args.freeze_start_frame else args.i_weights_warmup
-        if cur_frame >= 9:
+        # if cur_frame >= 30:
+        #     quality_good = True
+        #     train_unmasked_iter = train_iter * 0.75 // 1
+        #     train_both_iter = train_iter * 0.75 // 1 * 1000  # means never train bgd cuz its well trained
+        # else:
+        #     quality_good = False
+        #     train_unmasked_iter = train_iter * 0.5 // 1
+        #     train_both_iter = train_iter * 0.75 // 1
+        if cur_frame >= args.freeze_start_frame:
             quality_good = True
             train_unmasked_iter = train_iter * 0.75 // 1
-            train_both_iter = train_iter * 0.75 // 1 * 1000  # means never train bgd cuz its well trained
+            # train_unmasked_prob = 0.5
+            train_both_iter = train_iter * 0.75 * 1000  # means never train bgd cuz its well trained
         else:
             quality_good = False
             train_unmasked_iter = train_iter * 0.5 // 1
-            train_both_iter = train_iter * 0.75 // 1
+            # train_unmasked_prob = 0.5
+            train_both_iter = (train_iter * 0.75) // 1 #if cur_frame > 5 else (train_iter * 0.75 // 1 * 1000)
+            # train_both_iter = 0
 
         # freezing layers when quality is stable:
         # 1. static NeRF: freeze entire model
         # 2. dynamic INV:   if not at Stage 3 (INV) yet, don't freeze
         #                   if at Stage 3, freeze color layers
         do_freeze = cur_frame >= args.freeze_start_frame
-        if (do_freeze or quality_good) and not args.pretraining_static:
+        if not args.pretraining_static:
             for i in range(len(nerf)):
+                print(f"nerf {i}")
                 if i == 0:
-                    freeze_start_layer = 0
+                    # for static model, freeze all once stabilizes
+                    # otherwise, train first 3 layers
+                    if (do_freeze or quality_good):
+                        print(f"freeze all")
+                        freeze_start_layer = 0
+                    else:
+                        print(f"freeze after {args.mid_freeze_start}")
+                        freeze_start_layer = args.mid_freeze_start
                 else:
+                    # for dynamic model, freeze after the given frame
                     if not do_freeze:
+                        print(f"none frozen")
                         continue
                     else:
+                        print(f"freeze after {args.mid_freeze_start}")
                         freeze_start_layer = args.mid_freeze_start
+
 
                 nr = nerf[i]
                 models = [nr["render_kwargs_train"]['network_fine'], nr["render_kwargs_train"]['network_fn']]
@@ -219,6 +253,26 @@ def train():
                     model_tmp.alpha_linear.bias.requires_grad = False
                     model_tmp.rgb_linear.weight.requires_grad = False
                     model_tmp.rgb_linear.bias.requires_grad = False
+            # else:
+            #     models = [nerf[0]["render_kwargs_train"]['network_fine'],
+            #               nerf[0]["render_kwargs_train"]['network_fn']]
+            #     for model_tmp in models:
+            #         # print(f"static model: freezing all layers except alpha")
+            #         for l in range(len(model_tmp.pts_linears)):
+            #             if l < args.mid_freeze_start:
+            #                 print(f"layer {l} not frozen")
+            #                 continue
+            #             model_tmp.pts_linears[l].weight.requires_grad = False
+            #             model_tmp.pts_linears[l].bias.requires_grad = False
+            #         model_tmp.views_linears[0].weight.requires_grad = False
+            #         model_tmp.views_linears[0].bias.requires_grad = False
+            #         model_tmp.feature_linear.weight.requires_grad = False
+            #         model_tmp.feature_linear.bias.requires_grad = False
+            #         model_tmp.rgb_linear.weight.requires_grad = False
+            #         model_tmp.rgb_linear.bias.requires_grad = False
+            #         # do train alpha
+            #         model_tmp.alpha_linear.weight.requires_grad = False
+            #         model_tmp.alpha_linear.bias.requires_grad = False
 
         # static and dynamic NeRF are trained separately
         if args.pretraining_static:
@@ -241,6 +295,7 @@ def train():
                 for param_group in nr["optimizer"].param_groups:
                     param_group['lr'] = new_lrate
 
+            render_kwargs_train_two_models['train_static'] = False
             if ni == 0:
                 # Note: Stage 0: pretraining static background NeRF
 
@@ -252,44 +307,71 @@ def train():
             else:
                 # Note: Stage 1-3: training dynamic foreground INV
 
-                if i < train_unmasked_iter:
-                    # First part of training: use masked fgd images
-                    batch = dynamic_rays_rgb[i_dynamic:i_dynamic + N_rand]
-                    i_dynamic = (i_dynamic + N_rand) % dynamic_rays_rgb.shape[0]
-                    do_train_unmasked = False
-                    do_train_both = False
-                    do_enforce_zero_rgba = False
+                # old: First use masked fgd images
+                # new:
+                # if np.random.rand() > train_unmasked_prob:
+                #     batch = dynamic_rays_rgb[i_dynamic:i_dynamic + N_rand]
+                #     i_dynamic = (i_dynamic + N_rand) % dynamic_rays_rgb.shape[0]
+                #     do_train_unmasked = False
+                #     do_train_both = False
+                #     do_enforce_zero_rgba = False
+                # else:
+                #     # do_static = (not quality_good) and (np.random.rand() > 0.5)
+                #     do_static = False
+                #     if do_static:
+                #         # there's a 50% chance to train static bgd NeRF
+                #         batch = static_rays_rgb[i_static:i_static + N_rand]
+                #         i_static = (i_static + N_rand) % static_rays_rgb.shape[0]
+                #         cur_render_kwargs_train = nerf[0]['render_kwargs_train']
+                #         cur_opti = nerf[0]['optimizer']
+                #
+                #         do_train_unmasked = False
+                #         do_train_both = False
+                #         do_enforce_zero_rgba = False
+                #     else:
+                #         # train both models with entire images
+                #         batch = rays_rgb[i_batch:i_batch + N_rand]  # [B, 2+1, 3*?]
+                #         do_train_unmasked = True
+                #         zero_alpha_weight = 0.01 * 0.3
+                #         do_enforce_zero_rgba = args.enforce_zero_rgba
+                #         # if quality_good:
+                #         #     do_enforce_zero_rgba = args.enforce_zero_rgba
+                #         #     zero_alpha_weight = 0.01
+                #         # else:
+                #         #     do_enforce_zero_rgba = False
+                #         #     zero_alpha_weight = 0.
+                #
+                #         # for final iters, train fgd INV & bgd NeRF together
+                #         if i < train_both_iter:
+                #             do_train_both = False
+                #         else:
+                #             render_kwargs_train_two_models['train_static'] = True
+                #             do_train_both = True
+                do_static = (i >= train_unmasked_iter) and (np.random.rand() > 0.5) \
+                            and not quality_good
+                do_train_unmasked = not do_static and (i >= train_unmasked_iter) \
+                                    and not args.pretraining_static and masks is not None
+
+                # do_train_unmasked = True
+                do_train_both = (i > train_both_iter) and do_train_unmasked
+                render_kwargs_train_two_models['train_static'] = do_static or do_train_both
+
+                do_enforce_zero_rgba = args.enforce_zero_rgba and do_train_unmasked
+                zero_alpha_weight = 0.01
+
+                cur_render_kwargs_train = nr['render_kwargs_train']
+                cur_opti = nr['optimizer']
+                if do_static:
+                    i_static = (i_static + N_rand) % static_rays_rgb.shape[0]
+                    batch = static_rays_rgb[i_static:i_static + N_rand]
+                    cur_render_kwargs_train = nerf[0]['render_kwargs_train']
+                    cur_opti = nerf[0]['optimizer']
+                elif masks is None or do_train_unmasked or do_train_both:
+                    # use all rays for dynamic content
+                    batch = rays_rgb[i_batch:i_batch + N_rand]  # [B, 2+1, 3*?]
                 else:
-                    do_static = (not quality_good) and (np.random.rand() > 0.5)
-                    # do_static = False
-                    if do_static:
-                        # there's a 50% chance to train static bgd NeRF
-                        batch = static_rays_rgb[i_static:i_static + N_rand]
-                        i_static = (i_static + N_rand) % static_rays_rgb.shape[0]
-                        cur_render_kwargs_train = nerf[0]['render_kwargs_train']
-                        cur_opti = nerf[0]['optimizer']
-
-                        do_train_unmasked = False
-                        do_train_both = False
-                        do_enforce_zero_rgba = False
-                    else:
-                        # train INV with entire unmasked images
-                        batch = rays_rgb[i_batch:i_batch + N_rand]  # [B, 2+1, 3*?]
-                        do_train_unmasked = True
-                        zero_alpha_weight = 0.01
-                        do_enforce_zero_rgba = args.enforce_zero_rgba
-                        # if quality_good:
-                        #     do_enforce_zero_rgba = args.enforce_zero_rgba
-                        #     zero_alpha_weight = 0.01
-                        # else:
-                        #     do_enforce_zero_rgba = False
-                        #     zero_alpha_weight = 0.
-
-                        # for final iters, train fgd INV & bgd NeRF together
-                        if i < train_both_iter:
-                            do_train_both = False
-                        else:
-                            do_train_both = True
+                    i_dynamic = (i_dynamic + N_rand) % dynamic_rays_rgb.shape[0]
+                    batch = dynamic_rays_rgb[i_dynamic:i_dynamic + N_rand]
 
             if batch.shape[0] <= 0:
                 print('Zero batch:', i)
@@ -298,12 +380,14 @@ def train():
             batch_rays, target_s, K_rays = batch[:2], batch[2], batch[3:]
 
             # for dynamic NeRF, render static background NeRF
-            if args.pretraining_static or not do_train_unmasked:
-                rgb, disp, acc, extras = render(H, W, K_rays, chunk=args.chunk, rays=batch_rays,
-                                                verbose=i < 10, retraw=True, **nr["render_kwargs_train"])
-            else:
-                rgb, disp, acc, extras = render_blend_two_models(H, W, K_rays, chunk=args.chunk, rays=batch_rays,
-                                                                 verbose=i<10, retraw=True, **render_kwargs_train_two_models)
+            # if not args.pretraining_static and do_train_unmasked: # or not do_train_unmasked:
+            #     rgb, disp, acc, extras = render_blend_two_models(H, W, K_rays, chunk=args.chunk, rays=batch_rays,
+            #                                                      verbose=i<10, retraw=True, **render_kwargs_train_two_models)
+            # else:
+            #     rgb, disp, acc, extras = render(H, W, K_rays, chunk=args.chunk, rays=batch_rays,
+            #                                     verbose=i < 10, retraw=True, **nr["render_kwargs_train"])
+            rgb, disp, acc, extras = render_blend_two_models(H, W, K_rays, chunk=args.chunk, rays=batch_rays,
+                                                             verbose=i<10, retraw=True, **render_kwargs_train_two_models)
 
             # backprop
             cur_opti.zero_grad()
@@ -317,10 +401,24 @@ def train():
                 img_loss0 = loss_fn(rgb0, target_s)
                 loss = loss + img_loss0
 
+
+            # if not do_train_unmasked:
+            #     pass
+               # loss = loss + (loss_fn(extras['rgb_d'], target_s) + loss_fn(extras['rgb0_d'], target_s))
             if do_enforce_zero_rgba:
-                loss = loss + zero_alpha_weight * (
-                        (extras['rgb_d'] + extras['rgb0_d'])[masks[i_batch:i_batch + N_rand, 0, 0]].mean()
-                        + 0.3 * (extras['acc_map_d'] + extras['acc_map0_d'])[masks[i_batch:i_batch + N_rand, 0, 0]].mean())
+                #cur_mask = masks[i_batch:i_batch + N_rand, 0, 0]
+
+                # enforce background color
+                #cur_bgd_mask = (1. * cur_mask)[:, None]
+                #masked_target = target_s * cur_bgd_mask
+                #loss = loss + (loss_fn(extras['rgb_s'] * cur_bgd_mask, masked_target) \
+                #      + loss_fn(extras['rgb0_s'] * cur_bgd_mask, masked_target))
+
+                # zero out background
+                loss = loss + zero_alpha_weight * \
+                       (extras['rgb_d'] + extras['rgb0_d'])[masks[i_batch:i_batch + N_rand, 0, 0]].mean() \
+                       + zero_alpha_weight * 0.3 * \
+                       (extras['acc_map_d'] + extras['acc_map0_d'])[masks[i_batch:i_batch + N_rand, 0, 0]].mean()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(cur_render_kwargs_train['network_fn'].parameters(), 2.)
@@ -370,28 +468,35 @@ def train():
                 imageio.imwrite(filename, to8b(rgb.cpu().numpy()))
             else:
                 rgb, disp, acc, extras = render_blend_two_models(H, W, K[img_i], chunk=args.chunk, c2w=pose,
-                                                                 **render_kwargs_test_two_models)
-                rgb_d, disp_d, acc_d, _ = render(H, W, K[img_i], chunk=args.chunk, c2w=pose,
-                                                 **nerf[1]['render_kwargs_test'])
+                                                                 retraw=True, **render_kwargs_test_two_models)
+                # rgb_s, disp_s, acc_s, _ = render(H, W, K[img_i], chunk=args.chunk, c2w=pose,
+                #                                  **nerf[0]['render_kwargs_test'])
 
                 psnr = mse2psnr(img2mse(rgb, gt_img))
                 filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}.png')
                 imageio.imwrite(filename, to8b(rgb.cpu().numpy()))
                 filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_dyn.png')
-                imageio.imwrite(filename, to8b(rgb_d.cpu().numpy()))
-                filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_dyn_disp.png')
-                imageio.imwrite(filename, to8b(disp_d.cpu().numpy()))
-                filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_dyn_acc.png')
-                imageio.imwrite(filename, to8b(acc_d.cpu().numpy()))
+                imageio.imwrite(filename, to8b(extras['rgb_d'].cpu().numpy()))
+                filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_static.png')
+                imageio.imwrite(filename, to8b(extras['rgb_s'].cpu().numpy()))
+                filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_acc_d.png')
+                imageio.imwrite(filename, to8b(extras['acc_map_d'].cpu().numpy()))
+
+                # filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_dyn.png')
+                # imageio.imwrite(filename, to8b(rgb_d.cpu().numpy()))
+                # filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_dyn_disp.png')
+                # imageio.imwrite(filename, to8b(disp_d.cpu().numpy()))
+                # filename = os.path.join(vis_dir, f'cam{img_i:02d}_frame{cur_frame:04d}_{psnr.item():04f}_dyn_acc.png')
+                # imageio.imwrite(filename, to8b(acc_d.cpu().numpy()))
 
         # Rest is logging
-        suffix = ''
         for ni in range(len(nerf)):
             if args.pretraining_static and ni > 0:
                 break
 
-            suffix = '_static' if ni == 0 else '_dynamic'
-            path = os.path.join(basedir, expname+suffix, f'{cur_frame:06d}{suffix}.tar')
+            suffix = '_static' if args.pretraining_static else '_dynamic'
+            fn_suffix = '_static' if ni == 0 else '_dynamic'
+            path = os.path.join(basedir, expname+suffix, f'{cur_frame:06d}{fn_suffix}.tar')
             save_dict = {
                 'global_step': global_step,
                 'network_fn_state_dict': nerf[ni]['render_kwargs_train']['network_fn'].state_dict(),

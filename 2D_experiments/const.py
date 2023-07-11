@@ -1,7 +1,13 @@
 is_vid = True
 if is_vid:
-    vid_path = '/playpen-ssd/mikewang/incremental_neural_videos/2D_data/family/'
-    vid_name = 'family.mp4'
+    # vid_path = '/playpen-ssd/mikewang/incremental_neural_videos/2D_data/family/'
+    # vid_name = 'family.mp4'
+    # vid_path = '/playpen-ssd/mikewang/incremental_neural_videos/2D_data/chess/'
+    # vid_name = 'chess.mp4'
+    # vid_path = '/playpen-ssd/mikewang/incremental_neural_videos/2D_data/birthday/'
+    # vid_name = 'birthday.mp4'
+    vid_path = '/playpen-ssd/mikewang/incremental_neural_videos/2D_data/sea/'
+    vid_name = 'sea.mp4'
 else:
     vid_path = '/playpen-ssd/mikewang/incremental_neural_videos/2D_data/kid_running/'
 
@@ -11,15 +17,15 @@ if is_baseline:     # for quantitative comparisons at the same iterations
     start_frame = 10   # frame indices starts at 1
     train_iters = per_frame_train_iters * start_frame
 else:
-    start_frame = 1
+    start_frame = 500
     train_iters = per_frame_train_iters
 
 n_layers = 5
 img_downsample = 4
 learning_rate = 1e-4
 
-no_siren_only_mlp = False
-use_nerf_pe = False
+no_siren_only_mlp = True
+use_nerf_pe = True
 if use_nerf_pe:
     mapping_size = 128
     network_size = (5, (mapping_size*2)*2+2, 256)

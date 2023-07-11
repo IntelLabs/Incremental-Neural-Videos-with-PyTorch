@@ -2,7 +2,7 @@
 # s: from which layer to freeze
 # SD: sample dynamic pixels more
 # near: nearest sampling inv depth. META day scenes are ~0.5, night scenes ~0.3
-expname = META_cut_roasted_beef_3D_color_transfer_from_flame_salmon
+expname = META_cut_roasted_beef_3D_color_transfer_from_flame_salmon_3structlayer
 basedir = ../../META_data/cut_roasted_beef/down_2x
 datadir = ../../META_data/cut_roasted_beef/down_2x
 dataset_type = META
@@ -10,10 +10,10 @@ dataset_type = META
 ft_path = /playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/META_flame_salmon_1_nerf_no_transer_iter280k/000011.tar
 is_nerf_baseline = True             # True if running NeRF baseline, will disable incremental training.
 i_iter_img = 500           # save rendering every N iterations
-i_weights_warmup = 5000   # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
-i_weights = 5000          # iters/frame after warmup, during Structure Transfer (with frozen/shared later layers). 10k is 7.5~8min
+i_weights_warmup = 50000   # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
+i_weights = 50000          # iters/frame after warmup, during Structure Transfer (with frozen/shared later layers). 10k is 7.5~8min
 freeze_start_frame = 0     # on and after this frame, color layers will be frozen/shared.
-mid_freeze_start = 1        # on and after this layer, layers are frozen/shared. (3 means 0,1,2 are not frozen)
+mid_freeze_start = 3        # on and after this layer, layers are frozen/shared. (3 means 0,1,2 are not frozen)
 near = 0.35                  # nearest (inverted if NDC) depth for sampling start. META day scenes are ~0.5, night scenes ~0.3
 
 # not used

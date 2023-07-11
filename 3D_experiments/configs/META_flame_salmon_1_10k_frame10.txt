@@ -29,7 +29,6 @@ mid_freeze_end = 8
 #lrate = 1e-3
 #lrate_decay = 30
 no_skip_connect = True
-is_nerf_baseline = False
 i_img = 100
 no_reload = False
 

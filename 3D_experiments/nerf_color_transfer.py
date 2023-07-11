@@ -21,7 +21,7 @@ META, LF = ['META', 'little_falls']
 
 # model weights for color layer, later finetuned on the frame based on the config file
 start_frame = 1     # index starts at 1
-continue_prev_exp = True
+continue_prev_exp = False
 if continue_prev_exp:
     base_weight = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/' \
                   'META_flame_salmon_3D_color_transfer_from_cut_roasted_beef/000001_iter004999.tar'
@@ -63,8 +63,13 @@ def train():
 
         render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, ckpt_path = create_nerf(args)
         render_kwargs_train_prev, render_kwargs_test_prev, _, _, _, _ = create_nerf(args)
-        global_step = start
-        iter_start = start
+        if continue_prev_exp:
+            global_step = start
+            iter_start = start
+        else:
+            global_step = 0
+            iter_start = 0
+
     else:
         print("3D color transfer with INV (with skip connection)")
         render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, ckpt_path = create_nerf(args)
@@ -163,7 +168,8 @@ def train():
         train_iter = args.i_weights if cur_frame >= args.freeze_start_frame else args.i_weights_warmup
         for i in tqdm(range(iter_start, train_iter)):
             # nerf baseline: render intermediate results
-            if args.is_nerf_baseline and (i % args.i_iter_img == 0 or i == train_iter-1):
+            # if args.is_nerf_baseline and (i % args.i_iter_img == 0 or i == train_iter-1):
+            if args.is_nerf_baseline and (i in [0, 500, 1000, 10000, 20000]):
                 with torch.no_grad():
                     for img_i in [0, 1, 8, 17]:
                         gt_img = torch.Tensor(images[img_i]).to(device)

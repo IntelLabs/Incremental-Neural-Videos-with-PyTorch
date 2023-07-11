@@ -457,7 +457,7 @@ def load_LF_data(basedir, start_frame, factor=8, recenter=True, bd_factor=.75, s
         poses, K, bds, imgs = _load_LF_data(basedir, start_frame, factor=factor)  # factor=8 downsamples original imgs by 8x
     except:
         return None
-    # note: target coord-sys (graphics) : x: right, y: up, z:out-of,
+    # note: target coord-sys (graphics) : x: right, y: up, z:out-of of the screen,
     #  cv convention in target coord-sys: [x, -y, -z]
     K = np.moveaxis(K, -1, 0).astype(np.float32)
     # poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1)

@@ -10,20 +10,21 @@ import torch
 # loss_fn = lpips.LPIPS(net='alex-lin').cuda()
 
 import models
-def im2tensor(image, imtype=np.uint8, cent=1., factor=1./2.):
+def im2tensor(image, imtype=np.uint8, cent=1., factor=255./2.):
     return torch.Tensor((image / factor - cent)
                         [:, :, :, np.newaxis].transpose((3, 2, 0, 1)))
+
 model = models.PerceptualLoss(model='net-lin',net='alex',use_gpu=True,version=0.1)
 
 import matplotlib.pyplot as plt
 
 n_imgs = 300
 fps = 30
-DO_NERF = True
+DO_NERF = False
 partial_xfer_start = 150
-DO_NGP = False
+DO_NGP = True
 DO_MERGE_GRAPH = False
-DO_PSNR_LPIPS_ONE_PLOT = True
+DO_PSNR_LPIPS_ONE_PLOT = False
 DO_MAKE_VIDEO = False
 
 # root_dir = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/'
@@ -39,48 +40,82 @@ DO_MAKE_VIDEO = False
 # root_dir = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/sear_steak/down_2x/'
 # base_folder_list = [f'{root_dir}' + 'META_flame_salmon_1_warmup120k_iter120k_s3_stability0_relu_l2/']
 
-root_dir = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/coffee_martini/down_2x/'
-base_folder_list = [f'{root_dir}' + 'META_flame_salmon_1_warmup120k_iter120k_s3_stability0_relu_l2/']
+# root_dir = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/coffee_martini/down_2x/'
+root_dir = '/playpen-ssd/mikewang/incremental_neural_videos/META_data/flame_salmon_1/down_2x/'
+if DO_NGP:
+    base_folder_list = [f'{root_dir}' + 'instant_ngp_esti_800_freeze30/']
+    # base_folder_list = [f'{root_dir}' + 'instant_ngp_esti_800_baseline/']
+else:
+    base_folder_list = [f'{root_dir}' + 'META_flame_salmon_1_warmup280k_iter280k_s3_stability0_SD65_relu_no_skip/']
 
 out = {}
 for i, base_folder in enumerate(base_folder_list):
-    expname = base_folder.split('/')[-2].split('_')[5].replace('iter', '') + ' iter/frame'
-    # if i == (len(base_folder_list)-1):
-    #     expname = base_folder.split('/')[-2].split('_')[5].replace('iter', '') + ' iter/frame w/ trained color layers'
-    ngp_frames_folder = base_folder+'frames'
-    ngp_image_folder = base_folder+'instant_ngp_esti'
-    inv_frames_folder = base_folder+'../frames_2'
-    inv_image_folder = base_folder+'nerf_esti'
+    gt_frames_folder = base_folder + '../frames_2'
 
-    ngp_images = sorted(glob.glob(os.path.join(ngp_image_folder, "*.jpg")))
-    ngp_frames = sorted(glob.glob(os.path.join(ngp_frames_folder, "*cam00.png")))
-    inv_images = sorted(glob.glob(os.path.join(inv_image_folder, "*.png")))
-    gt_frames = sorted(glob.glob(os.path.join(inv_frames_folder, "*cam00.png")))
+    if DO_NGP:
+        ngp_frames_folder = base_folder + 'frames_2'
+        ngp_image_folder = base_folder + './'
+        ngp_images = sorted(glob.glob(os.path.join(ngp_image_folder, "*.jpg")))
+        gt_frames = sorted(glob.glob(os.path.join(gt_frames_folder, "*cam00.png")))
+        height, width, layers = cv2.imread(ngp_images[0]).shape
 
-    height, width, layers = cv2.imread(inv_images[0]).shape
-    inv_psnr_list = []
-    inv_LPIPS_list = []
-    out[base_folder] = {}
-    for j, image in enumerate(inv_images):
-        if j >= n_imgs:
-            break
-        print(f"{j}/{len(inv_images)}")
-        esti = cv2.imread(image)
-        gt = cv2.imread(gt_frames[j])
-        esti = im2tensor(esti).cuda() / 255
-        gt = im2tensor(gt).cuda() / 255
+        ngp_psnr_list = []
+        ngp_LPIPS_list = []
+        out[base_folder] = {}
+        for j, image in enumerate(ngp_images):
+            if j >= n_imgs:
+                break
+            print(f"{j}/{len(ngp_images)}")
+            esti = cv2.imread(image)
+            gt = cv2.imread(gt_frames[j])
+            esti_tensor = im2tensor(esti).cuda()
+            gt_tensor = im2tensor(gt).cuda()
 
-        cur_psnr = float(image.split('_')[-1][:-4])
-        with torch.no_grad():
-            lpips_loss = model.forward(gt, esti).item()
-        print(f"cur_psnr: {cur_psnr:.6f}, LPIPS: {lpips_loss:.6f}")
-        inv_psnr_list.append(cur_psnr)
-        inv_LPIPS_list.append(lpips_loss)
+            with torch.no_grad():
+                lpips_loss = model.forward(gt_tensor, esti_tensor).item()
 
-    print(f"mean psnr: {np.mean(inv_psnr_list):.6f}, LPIPS: {np.mean(inv_LPIPS_list):.6f}")
-    out[base_folder]['nerf_psnr_list'] = inv_psnr_list
-    out[base_folder]['nerf_LPIPS_list'] = inv_LPIPS_list
-    out[base_folder]['expname'] = expname
+            mse = torch.square(torch.tensor(gt).float()/255 - torch.tensor(esti).float()/255).mean()
+            cur_psnr = 20 * torch.log10(torch.tensor(1.)) - 10 * torch.log10(mse)
+            print(f"cur_psnr: {cur_psnr:.6f}, LPIPS: {lpips_loss:.6f}")
+            ngp_psnr_list.append(cur_psnr)
+            ngp_LPIPS_list.append(lpips_loss)
+
+        print(f"mean psnr: {np.mean(ngp_psnr_list):.6f}, LPIPS: {np.mean(ngp_LPIPS_list):.6f}")
+        out[base_folder]['ngp_psnr_list'] = ngp_psnr_list
+        out[base_folder]['ngp_LPIPS_list'] = ngp_LPIPS_list
+        out[base_folder]['expname'] = expname
+    else:
+        expname = base_folder.split('/')[-2].split('_')[5].replace('iter', '') + ' iter/frame'
+        inv_image_folder = base_folder + 'nerf_esti'
+        inv_images = sorted(glob.glob(os.path.join(inv_image_folder, "*.png")))
+        gt_frames = sorted(glob.glob(os.path.join(gt_frames_folder, "*cam00.png")))
+        height, width, layers = cv2.imread(inv_images[0]).shape
+
+        inv_psnr_list = []
+        inv_LPIPS_list = []
+        out[base_folder] = {}
+        for j, image in enumerate(inv_images):
+            if j >= n_imgs:
+                break
+            print(f"{j}/{len(inv_images)}")
+            esti = cv2.imread(image)
+            gt = cv2.imread(gt_frames[j])
+            # esti = im2tensor(esti).cuda() / 255
+            # gt = im2tensor(gt).cuda() / 255
+            esti = im2tensor(esti).cuda()
+            gt = im2tensor(gt).cuda()
+
+            cur_psnr = float(image.split('_')[-1][:-4])
+            with torch.no_grad():
+                lpips_loss = model.forward(gt, esti).item()
+            print(f"cur_psnr: {cur_psnr:.6f}, LPIPS: {lpips_loss:.6f}")
+            inv_psnr_list.append(cur_psnr)
+            inv_LPIPS_list.append(lpips_loss)
+
+        print(f"mean psnr: {np.mean(inv_psnr_list):.6f}, LPIPS: {np.mean(inv_LPIPS_list):.6f}")
+        out[base_folder]['nerf_psnr_list'] = inv_psnr_list
+        out[base_folder]['nerf_LPIPS_list'] = inv_LPIPS_list
+        out[base_folder]['expname'] = expname
 
 if DO_NGP:
     ngp_psnr_list = []

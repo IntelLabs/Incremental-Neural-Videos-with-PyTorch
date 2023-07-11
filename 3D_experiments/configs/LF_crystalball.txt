@@ -30,14 +30,13 @@ mid_freeze_end = 8
 #lrate = 1e-3
 #lrate_decay = 30
 no_skip_connect = True
-is_nerf_baseline = False
 i_img = 100
 no_reload = False
 
 start_frame = 1
 factor = 2
 #factor = 4
-llffhold = 0
+llffhold = 7
 
 N_rand = 1024
 N_samples = 64

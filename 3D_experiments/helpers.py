@@ -19,13 +19,13 @@ def batchify(fn, chunk):
     """
     if chunk is None:
         return fn
-    def ret(inputs, only_train_alpha_head=False):
-        return torch.cat([fn(inputs[i:i+chunk], only_train_alpha_head) for i in range(0, inputs.shape[0], chunk)], 0)
+    def ret(inputs):
+        return torch.cat([fn(inputs[i:i+chunk]) for i in range(0, inputs.shape[0], chunk)], 0)
     return ret
 
 
 def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024*64,
-                needs_flatten=True, only_train_alpha_head=False):
+                needs_flatten=True):
     """Prepares inputs and applies network 'fn'.
     """
     if needs_flatten:
@@ -43,7 +43,7 @@ def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024*64,
         embedded_dirs = embeddirs_fn(input_dirs_flat)
         embedded = torch.cat([embedded, embedded_dirs], -1)
 
-    outputs_flat = batchify(fn, netchunk)(embedded, only_train_alpha_head)
+    outputs_flat = batchify(fn, netchunk)(embedded)
     outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
     return outputs
 
@@ -295,9 +295,9 @@ def create_nerf(args):
                           input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
         grad_vars += list(model_fine.parameters())
 
-    network_query_fn = lambda inputs, viewdirs, network_fn, needs_flatten=True, only_train_alpha_head=False: \
+    network_query_fn = lambda inputs, viewdirs, network_fn, needs_flatten=True: \
         run_network(inputs, viewdirs, network_fn, embed_fn=embed_fn, embeddirs_fn=embeddirs_fn,
-                    netchunk=args.netchunk, needs_flatten=needs_flatten, only_train_alpha_head=only_train_alpha_head)
+                    netchunk=args.netchunk, needs_flatten=needs_flatten)
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
@@ -313,7 +313,8 @@ def create_nerf(args):
         ckpts = [args.ft_path]
     else:
         ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname)))
-                 if ('tar' in f and f.split('.')[0].replace('_static','').replace('_dynamic','').isnumeric())]
+                 if ('tar' in f and f.split('.')[0].replace('_static','').replace('_dynamic','').isnumeric()
+                     and (not args.split_static_dynamic or f.split('.')[0].split('_')[-1] == expname.split('_')[-1]))]
 
     print('Found ckpts', ckpts)
     if len(ckpts) > 0 and not args.no_reload:
@@ -409,6 +410,71 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     return rgb_map, disp_map, acc_map, weights, depth_map, alpha
 
 
+# def raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
+#     """Transforms model's predictions to semantically meaningful values.
+#     Args:
+#         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
+#         z_vals: [num_rays, num_samples along ray]. Integration time.
+#         rays_d: [num_rays, 3]. Direction of each ray.
+#     Returns:
+#         rgb_map: [num_rays, 3]. Estimated RGB color of a ray.
+#         disp_map: [num_rays]. Disparity map. Inverse of depth map.
+#         acc_map: [num_rays]. Sum of weights along each ray.
+#         weights: [num_rays, num_samples]. Weights assigned to each sampled color.
+#         depth_map: [num_rays]. Estimated distance to object.
+#     """
+#     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
+#     # raw2alpha = lambda raw, dists, act_fn=torch.exp: 1. - torch.exp(-act_fn(raw) * dists)
+#
+#     dists = z_vals[...,1:] - z_vals[...,:-1]
+#     dists = torch.cat([dists, torch.Tensor([1e10]).expand(dists[...,:1].shape)], -1)  # [N_rays, N_samples]
+#
+#     dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
+#
+#     rgb_s = torch.sigmoid(raw_s[..., :3])  # [N_rays, N_samples, 3]
+#     rgb_d = torch.sigmoid(raw_d[..., :3])  # [N_rays, N_samples, 3]
+#     noise = 0.
+#     if raw_noise_std > 0.:
+#         noise = torch.randn(raw_s[...,3].shape) * raw_noise_std
+#
+#         # Overwrite randomly sampled data if pytest
+#         if pytest:
+#             np.random.seed(0)
+#             noise = np.random.rand(*list(raw_s[...,3].shape)) * raw_noise_std
+#             noise = torch.Tensor(noise)
+#
+#     alpha_s = raw2alpha(raw_s[..., 3] + noise, dists)  # [N_rays, N_samples]
+#     alpha_d = raw2alpha(raw_d[..., 3] + noise, dists)  # [N_rays, N_samples]
+#
+#     w_alpha = F.softmax(torch.stack([alpha_s, alpha_d],dim=0),dim=0)
+#     rgb = w_alpha[0,...,None] * rgb_s + w_alpha[1,...,None] * rgb_d
+#     alpha_s_blended = w_alpha[0] * alpha_s
+#     alpha_d_blended = w_alpha[1] * alpha_d
+#     alpha = alpha_s_blended + alpha_d_blended
+#
+#     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)), 1. - alpha + 1e-5], -1), -1)[:,:-1]
+#     rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
+#
+#     depth_map = torch.sum(weights * z_vals, -1)
+#     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
+#     acc_map = torch.sum(weights, -1)
+#
+#     weights_s = alpha_s * torch.cumprod(torch.cat([torch.ones((alpha_s.shape[0], 1)), 1. - alpha_s + 1e-5], -1), -1)[:,:-1]
+#     rgb_map_s = torch.sum(weights_s[...,None] * w_alpha[0,...,None] * rgb_s, -2)  # [N_rays, 3]
+#     # rgb_map_s = torch.sum(weights_s[..., None] * rgb_s, -2)  # [N_rays, 3]
+#     acc_map_s = torch.sum(weights_s, -1)
+#
+#     weights_d = alpha_d * torch.cumprod(torch.cat([torch.ones((alpha_d.shape[0], 1)), 1. - alpha_d + 1e-5], -1), -1)[:,:-1]
+#     rgb_map_d = torch.sum(weights_d[...,None] * w_alpha[1,...,None] * rgb_d, -2)  # [N_rays, 3]
+#     acc_map_d = torch.sum(weights_d, -1)
+#
+#     if white_bkgd:
+#         rgb_map = rgb_map + (1.-acc_map[...,None])
+#
+#     return rgb_map, disp_map, acc_map, weights, depth_map, alpha, \
+#            rgb_map_d, acc_map_d, alpha_d, rgb_map_s, acc_map_s, alpha_s
+
+
 def raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
@@ -453,6 +519,11 @@ def raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std=0, 
     acc_map_d = torch.sum(weights_d, -1)
     rgb_map_d = torch.sum(weights_d[...,None] * rgb, -2)  # [N_rays, 3]
 
+    alpha_s = raw2alpha(raw_s[..., 3] + noise, dists)  # [N_rays, N_samples]
+    weights_s = alpha_s * torch.cumprod(torch.cat([torch.ones((alpha_s.shape[0], 1)), 1. - alpha_s + 1e-5], -1), -1)[:,:-1]
+    acc_map_s = torch.sum(weights_s, -1)
+    rgb_map_s = torch.sum(weights_s[...,None] * rgb_s, -2)  # [N_rays, 3]
+
     depth_map = torch.sum(weights * z_vals, -1)
     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
     acc_map = torch.sum(weights, -1)
@@ -460,7 +531,8 @@ def raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std=0, 
     if white_bkgd:
         rgb_map = rgb_map + (1.-acc_map[...,None])
 
-    return rgb_map, disp_map, acc_map, weights, depth_map, alpha, rgb_map_d, acc_map_d
+    return rgb_map, disp_map, acc_map, weights, depth_map, alpha, \
+           rgb_map_d, acc_map_d, alpha_d, rgb_map_s, acc_map_s, alpha_s
 
 
 def render_rays(ray_batch,
@@ -540,6 +612,7 @@ def render_rays(ray_batch,
 
 
 #     raw = run_network(pts)
+    #raw = network_query_fn(pts, viewdirs, network_fn)
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map, alpha_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
 
@@ -556,6 +629,7 @@ def render_rays(ray_batch,
 
         run_fn = network_fn if network_fine is None else network_fine
 #         raw = run_network(pts, fn=run_fn)
+        #raw = network_query_fn(pts, viewdirs, run_fn)
         raw = network_query_fn(pts, viewdirs, run_fn)
 
         rgb_map, disp_map, acc_map, weights, depth_map, alpha_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
@@ -590,7 +664,7 @@ def render_rays_blend_models(ray_batch,
                 white_bkgd=False,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False):
+                pytest=False, train_static=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -655,17 +729,28 @@ def render_rays_blend_models(ray_batch,
 
 
 #     raw = run_network(pts)
-    raw_s = network_query_fn(pts, viewdirs, network_fn_s)
+    with torch.set_grad_enabled(train_static):
+        raw_s = network_query_fn(pts, viewdirs, network_fn_s)
     raw_d = network_query_fn(pts, viewdirs, network_fn_d)
-    # raw = raw_s + raw_d
-    rgb_map, disp_map, acc_map, weights, depth_map, alpha_map, rgb_map_d, acc_map_d \
-        = raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
-        # = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+
+    rgb_map, disp_map, acc_map, weights, depth_map, alpha_map, \
+    rgb_map_d, acc_map_d, alpha_d, rgb_map_s, acc_map_s, alpha_s \
+       = raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+#        # = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+#    rgb_map_s_only, disp_map_s_only, acc_map_s_only, weights_s_only, depth_map_s_only, alpha_map_s_only \
+#        = raw2outputs(raw_s, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
 
     if N_importance > 0:
 
-        rgb_map_0, disp_map_0, acc_map_0, alpha_map0, weights0, raw_d0, rgb_map_d0, acc_map0_d\
-            = rgb_map, disp_map, acc_map, alpha_map, weights, raw_d, rgb_map_d, acc_map_d
+        rgb_map_0, disp_map_0, acc_map_0, alpha_map0, weights0, raw_d0, \
+        rgb_map_d0, acc_map0_d, alpha0_d, rgb_map_s0, acc_map0_s, alpha0_s\
+           = rgb_map, disp_map, acc_map, alpha_map, weights, raw_d, \
+              rgb_map_d, acc_map_d, alpha_d, rgb_map_s, acc_map_s, alpha_s
+
+        #rgb_map_s_only0, disp_map_s_only0, acc_map_s_only0, weights_s_only0, depth_map_s_only0, alpha_map_s_only0\
+        #    = rgb_map_s_only, disp_map_s_only, acc_map_s_only, weights_s_only, depth_map_s_only, alpha_map_s_only
+
+        rgb_map_0, disp_map_0, acc_map_0, weights0, alpha_map0 = rgb_map, disp_map, acc_map, weights, alpha_map
 
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
         z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
@@ -676,20 +761,38 @@ def render_rays_blend_models(ray_batch,
 
         # run_fn = network_fn if network_fine is None else
 #         raw = run_network(pts, fn=run_fn)
-        raw_s = network_query_fn(pts, viewdirs, network_fine_s)
+        with torch.set_grad_enabled(train_static):
+            raw_s = network_query_fn(pts, viewdirs, network_fine_s)
         raw_d = network_query_fn(pts, viewdirs, network_fine_d)
-        # raw = raw_s + raw_d
-        rgb_map, disp_map, acc_map, weights, depth_map, alpha_map, rgb_map_d, acc_map_d \
-            = raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
-            # = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+
+        rgb_map, disp_map, acc_map, weights, depth_map, alpha_map, \
+        rgb_map_d, acc_map_d, alpha_d, rgb_map_s, acc_map_s, alpha_s \
+           = raw2outputs_blend_two_models(raw_s, raw_d, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+        #rgb_map_s_only, disp_map_s_only, acc_map_s_only, weights_s_only, depth_map_s_only, alpha_map_s_only \
+        #    = raw2outputs(raw_s, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+
+        # rgb_map, disp_map, acc_map, weights, depth_map, alpha_map \
+        #     = raw2outputs(raw_s, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map,
            'alpha_map' : alpha_map, 'weights' : weights}
     if retraw:
-        ret['rgb_d'] = rgb_map_d
-        ret['rgb0_d'] = rgb_map_d0
-        ret['acc_map_d'] = acc_map_d
-        ret['acc_map0_d'] = acc_map0_d
+       # ret['rgb_map_s_only'] = rgb_map_s_only
+       # ret['rgb_map_s_only0'] = rgb_map_s_only0
+       ret['rgb_d'] = rgb_map_d
+       ret['rgb0_d'] = rgb_map_d0
+       ret['acc_map_d'] = acc_map_d
+       ret['acc_map0_d'] = acc_map0_d
+       ret['alpha_d'] = alpha_d
+       ret['alpha0_d'] = alpha0_d
+
+       ret['rgb_s'] = rgb_map_s
+       ret['rgb0_s'] = rgb_map_s0
+       ret['acc_map_s'] = acc_map_s
+       ret['acc_map0_s'] = acc_map0_s
+       ret['alpha_s'] = alpha_s
+       ret['alpha0_s'] = alpha0_s
+
     if N_importance > 0:
         ret['rgb0'] = rgb_map_0
         ret['disp0'] = disp_map_0

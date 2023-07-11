@@ -18,10 +18,14 @@ from siren_ff import SIRENFF, input_mapping, MLP, get_embedder
 from neural_video import train_model
 
 import matplotlib.pyplot as plt
+REVERSE = -1
+FORWARD = 1
 
 do_color_scheme_transfer = False
 do_refine = False
-base_frame = 10
+# base_frame = 10
+base_frame = 500
+direction = FORWARD
 refine_iter = train_iters
 
 # read video
@@ -75,11 +79,11 @@ model_fn_list = sorted(glob.glob(os.path.join(model_dir, '*.pth')))
 
 
 if do_color_scheme_transfer:
-    raw_result_dir = os.path.join(vid_path, 'imgs_color_transfer_before_training')
-    refined_result_dir = os.path.join(vid_path, 'imgs_color_transfer')
+    raw_result_dir = os.path.join(vid_path, 'imgs_color_transfer_before_training'+('_reverse' if direction == REVERSE else ''))
+    refined_result_dir = os.path.join(vid_path, 'imgs_color_transfer'+'_reverse'+('_reverse' if direction == REVERSE else ''))
 else:
-    raw_result_dir = os.path.join(vid_path, 'imgs_swap_1st_raw')
-    refined_result_dir = os.path.join(vid_path, 'imgs_swap_1st_refined')
+    raw_result_dir = os.path.join(vid_path, 'imgs_swap_1st_raw'+('_reverse' if direction == REVERSE else ''))
+    refined_result_dir = os.path.join(vid_path, 'imgs_swap_1st_refined'+('_reverse' if direction == REVERSE else ''))
 
 if os.path.exists(raw_result_dir) or os.path.exists(refined_result_dir):  #or os.path.exists(quantized_result_dir):
     assert False, "make sure you clean previous data"
@@ -90,7 +94,10 @@ else:
 model_fn_base = os.path.join(model_dir, f'{base_frame:04d}.pth')
 loss_fn = torch.nn.MSELoss()
 for frame_i, frame in enumerate(data_iterator):
-    if frame_i < (base_frame+1):
+
+    if direction != REVERSE and frame_i < base_frame:
+        continue
+    elif direction == REVERSE and frame_i not in [base_frame-4,base_frame-3,base_frame-2,base_frame-1]:
         continue
 
     # making data

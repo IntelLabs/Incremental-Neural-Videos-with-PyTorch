@@ -2,7 +2,7 @@
 # s: from which layer to freeze
 # SD: sample dynamic pixels more
 # near: nearest sampling inv depth. META day scenes are ~0.5, night scenes ~0.3
-expname = META_flame_salmon_1_warmup280k_iter280k_s3_stability0_SD65_relu_no_skip
+expname = META_flame_salmon_1_warmup280k_iter10k_s3_stability0_SD65_relu_no_skip
 basedir = ../../META_data/flame_salmon_1/down_2x
 datadir = ../../META_data/flame_salmon_1/down_2x
 dataset_type = META

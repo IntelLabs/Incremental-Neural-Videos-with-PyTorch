@@ -2,32 +2,22 @@
 # s: from which layer to freeze
 # SD: sample dynamic pixels more
 # near: nearest sampling inv depth. META day scenes are ~0.5, night scenes ~0.3
-# expname = META_flame_salmon_1_warmup10k_iter10k_s3_freeze120_2nerf
-expname = META_flame_salmon_1_SplitINV_test_always_blend
+expname = META_flame_salmon_1_warmup280k_iter10k_s3_stability0_relu_l2_no_skip
 basedir = ../../META_data/flame_salmon_1/down_2x
 datadir = ../../META_data/flame_salmon_1/down_2x
 dataset_type = META
 
-# split static / dynamic
-split_static_dynamic = True # use 2 NeRFs: one for static part another for dynamic part
-pretraining_static = False
-
-# training
-# parallel = False
-enforce_zero_rgba = True
-start_frame = 1
-freeze_start_frame = 20     # on and after this frame, color layers will be frozen/shared.
-i_weights_warmup = 10000    # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
+is_nerf_baseline = False             # True if running NeRF baseline, will disable incremental training.
+i_weights_warmup = 280000    # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
 i_weights = 10000           # iters/frame after warmup, during Structure Transfer (with frozen/shared later layers). 10k is 7.5~8min
+freeze_start_frame = 21    # on and after this frame, color layers will be frozen/shared.
 mid_freeze_start = 3        # on and after this layer, layers are frozen/shared. (3 means 0,1,2 are not frozen)
 near = 0.5                  # nearest (inverted if NDC) depth for sampling start. META day scenes are ~0.5, night scenes ~0.3
-i_print = 1000
 
 # not used
-is_nerf_baseline = False             # True if running NeRF baseline, will disable incremental training.
-sample_static_prob = 0.65   # percent of static rays
 stabilize_start_frame = 3100
 sample_dynamic_more = False  # helps dynamic parts, but overall score worse
+sample_static_prob = 0.65
 stablize_iter_prob = 0
 prev_fine_as_new_coarse = False  # results slightly worse
 use_huber = False
@@ -38,9 +28,11 @@ mid_freeze_end = 8
 #lrate = 1e-3
 #lrate_decay = 30
 no_skip_connect = True
+is_nerf_baseline = False
 i_img = 1000
 no_reload = False
 
+start_frame = 1
 factor = 2
 #factor = 4
 llffhold = 0

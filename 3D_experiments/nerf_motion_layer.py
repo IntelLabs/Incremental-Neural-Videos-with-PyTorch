@@ -20,8 +20,8 @@ from load_llff import load_llff_data, load_LF_data, load_META_data
 
 META, LF = ['META', 'little_falls']
 
-base_frame = 462
-first_frame_to_process = 470 # base_frame+1
+base_frame = 1295
+first_frame_to_process = 1297 # base_frame+1
 DO_SWAP_LAYERS = True
 
 train_first_n_layers = 0

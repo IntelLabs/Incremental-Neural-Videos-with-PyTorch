@@ -110,43 +110,25 @@ class NeRF(nn.Module):
 
         return outputs
 
-    def forward(self, x, only_train_alpha_head=False):
+    def forward(self, x):
         input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
         h = input_pts
         for i, l in enumerate(self.pts_linears):
-            if only_train_alpha_head:
-                with torch.no_grad():
-                    h = self.pts_linears[i](h)
-                    h = F.relu(h)
-                    if i in self.skips:
-                        h = torch.cat([input_pts, h], -1)
-            else:
-                h = self.pts_linears[i](h)
-                h = F.relu(h)
-                if i in self.skips:
-                    h = torch.cat([input_pts, h], -1)
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
 
         if self.use_viewdirs:
             alpha = self.alpha_linear(h)
-            if only_train_alpha_head:
-                with torch.no_grad():
-                    feature = self.feature_linear(h)
-                    h = torch.cat([feature, input_views], -1)
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, input_views], -1)
 
-                    for i, l in enumerate(self.views_linears):
-                        h = self.views_linears[i](h)
-                        h = F.relu(h)
+            for i, l in enumerate(self.views_linears):
+                h = self.views_linears[i](h)
+                h = F.relu(h)
 
-                    rgb = self.rgb_linear(h)
-            else:
-                feature = self.feature_linear(h)
-                h = torch.cat([feature, input_views], -1)
-
-                for i, l in enumerate(self.views_linears):
-                    h = self.views_linears[i](h)
-                    h = F.relu(h)
-
-                rgb = self.rgb_linear(h)
+            rgb = self.rgb_linear(h)
             outputs = torch.cat([rgb, alpha], -1)
         else:
             outputs = self.output_linear(h)

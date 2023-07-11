@@ -1,32 +1,32 @@
 # FaC: previous Fine as new Coarse
 # s: from which layer to freeze
 # SD: sample dynamic pixels more
-# near: nearest sampling inv depth. META day scenes are ~0.5, night scenes ~0.3
-# expname = META_flame_salmon_1_warmup10k_iter10k_s3_freeze120_2nerf
-expname = META_flame_salmon_1_SplitINV_test_always_blend
-basedir = ../../META_data/flame_salmon_1/down_2x
-datadir = ../../META_data/flame_salmon_1/down_2x
-dataset_type = META
+# near: nearest sampling inv depth. META is ~0.5
 
-# split static / dynamic
-split_static_dynamic = True # use 2 NeRFs: one for static part another for dynamic part
+# 460 & 461 seems to be the best for visualization
+#expname = LF_snack_warmup20k_iter20k_s3_freeze120
+expname = LF_snack_warmup20k_iter20k_no_freeze
+basedir = ../../LittleFalls_data/snack
+datadir = ../../LittleFalls_data/snack
+dataset_type = little_falls
+
+split_static_dynamic = False # use 2 NeRFs: one for static part another for dynamic part
 pretraining_static = False
 
 # training
-# parallel = False
 enforce_zero_rgba = True
-start_frame = 1
-freeze_start_frame = 20     # on and after this frame, color layers will be frozen/shared.
+start_frame = 1290
+freeze_start_frame = 120000     # on and after this frame, color layers will be frozen/shared.
 i_weights_warmup = 10000    # iters/frame during warmup (before freezing/sharing later layers). Longer warmup, better color layers, better performance
 i_weights = 10000           # iters/frame after warmup, during Structure Transfer (with frozen/shared later layers). 10k is 7.5~8min
 mid_freeze_start = 3        # on and after this layer, layers are frozen/shared. (3 means 0,1,2 are not frozen)
-near = 0.5                  # nearest (inverted if NDC) depth for sampling start. META day scenes are ~0.5, night scenes ~0.3
+near = 0.0                  # nearest (inverted if NDC) depth for sampling start. META day scenes are ~0.5, night scenes ~0.3
 i_print = 1000
 
 # not used
 is_nerf_baseline = False             # True if running NeRF baseline, will disable incremental training.
 sample_static_prob = 0.65   # percent of static rays
-stabilize_start_frame = 3100
+stabilize_start_frame = 31000
 sample_dynamic_more = False  # helps dynamic parts, but overall score worse
 stablize_iter_prob = 0
 prev_fine_as_new_coarse = False  # results slightly worse
@@ -43,7 +43,7 @@ no_reload = False
 
 factor = 2
 #factor = 4
-llffhold = 0
+llffhold = 7
 
 N_rand = 1024
 N_samples = 64
@@ -54,3 +54,5 @@ raw_noise_std = 1e0
 
 render_only = False
 render_videos = False
+
+
