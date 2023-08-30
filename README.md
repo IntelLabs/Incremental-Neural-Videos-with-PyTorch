@@ -30,7 +30,7 @@ None<br />
 <br />
 
 #### NeRF (./3D_experiments/)
-[NeRF setup](./nerf-pytorch/README.md)<br />
+[NeRF dependencies setup](./3D_experiments/requirements.txt)<br />
 <br />
 
 ## Experiments
